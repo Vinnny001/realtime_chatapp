@@ -1,0 +1,25 @@
+{
+  "name": "chat-realtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ChatApp realtime service: Socket.IO messaging, receipts, typing, presence, call signaling",
+  "type": "module",
+  "main": "index.js",
+  "imports": {
+    "#shared": "./src/shared/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.15.2",
+    "socket.io": "^4.8.1",
+    "zod": "^3.25.76"
+  }
+}
