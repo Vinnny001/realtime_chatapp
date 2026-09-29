@@ -6,6 +6,7 @@ import {
   User,
   config,
   connectMongo,
+  initPush,
   corsOriginOption,
   rooms,
   verifyToken,
@@ -18,6 +19,7 @@ import { goOnline, registerPresenceHandlers } from './src/handlers/presence.js';
 import { registerCallHandlers } from './src/handlers/calls.js';
 
 await connectMongo();
+initPush();
 
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {

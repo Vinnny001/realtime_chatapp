@@ -6,6 +6,7 @@ import {
   canSend,
   createMessage,
   findConversationForUser,
+  pushNewMessage,
   rooms,
   sameId,
   serializeMessage,
@@ -75,7 +76,10 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
     });
 
     socket.join(rooms.conv(conversation._id));
-    if (!duplicate) toMembers(io, conversation).emit(EVENTS.MESSAGE_NEW, serializeMessage(message));
+    if (!duplicate) {
+      toMembers(io, conversation).emit(EVENTS.MESSAGE_NEW, serializeMessage(message));
+      pushNewMessage(message, conversation); // phones in the background / app closed
+    }
     return { message: serializeMessage(message, userId) };
   });
 
