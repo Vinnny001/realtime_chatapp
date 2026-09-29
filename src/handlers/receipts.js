@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Conversation, EVENTS, Message, rooms } from '#shared';
+import { Conversation, EVENTS, Message, pushRead, rooms } from '#shared';
 import { SocketError, objectId, toMembers } from '../socketUtils.js';
 
 // Receipts are watermarks: "everything up to <at> in this chat has reached / been read by me".
@@ -43,18 +43,20 @@ export function registerReceiptHandlers({ io, userId, on }) {
   on('conversation:read', watermarkSchema, async ({ conversationId, upTo }) => {
     const conv = await members(conversationId);
     const at = clamp(upTo);
-    await advance(userId, conversationId, ['lastDeliveredAt', 'lastReadAt'], at);
+    const changed = await advance(userId, conversationId, ['lastDeliveredAt', 'lastReadAt'], at);
 
     const unreadCount = await Message.countDocuments({
       conversation: conversationId,
       sender: { $ne: userId },
       createdAt: { $gt: at },
+      $nor: [{ type: 'call', 'call.status': { $ne: 'missed' } }], // only missed calls count as unread
     });
     await Conversation.updateOne(
       { _id: conversationId, 'participants.user': userId },
       { $set: { 'participants.$.unreadCount': unreadCount } }
     );
     toMembers(io, conv).emit(EVENTS.RECEIPT, { conversationId, userId, kind: 'read', at, unreadCount });
+    if (changed && unreadCount === 0) pushRead(userId, conversationId); // clear it on my other phones
     return { unreadCount };
   });
 }

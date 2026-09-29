@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   EVENTS,
+  MAX_TEXT_LENGTH,
   Message,
   UPLOAD_URL_PATTERN,
   canSend,
@@ -31,14 +32,14 @@ const sendSchema = z
     conversationId: objectId,
     clientId: z.string().min(8).max(64),
     type: z.enum(['text', 'image', 'video', 'audio', 'voice', 'file']).default('text'),
-    text: z.string().max(10000).default(''),
+    text: z.string().max(MAX_TEXT_LENGTH).default(''),
     media: mediaSchema.optional(),
     replyTo: objectId.nullish(),
     forwarded: z.boolean().optional(),
   })
   .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 : !!d.media), 'Message is empty');
 
-const editSchema = z.object({ messageId: objectId, text: z.string().trim().min(1).max(10000) });
+const editSchema = z.object({ messageId: objectId, text: z.string().trim().min(1).max(MAX_TEXT_LENGTH) });
 const deleteSchema = z.object({ messageId: objectId, forEveryone: z.boolean().default(false) });
 const reactSchema = z.object({ messageId: objectId, emoji: z.string().min(1).max(16).nullable() });
 

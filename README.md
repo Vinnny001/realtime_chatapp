@@ -36,3 +36,9 @@ The server pushes these events to clients: `message:new`, `message:updated`, `me
 ## Push notifications
 
 New messages are pushed to the recipients' phones through Firebase Cloud Messaging, so they arrive as pop-up notifications even when the app is closed. Muted chats and the sender's own devices are skipped. Set `FIREBASE_SERVICE_ACCOUNT` to the service-account key from Firebase (*Project settings → Service accounts → Generate new private key*): paste the whole JSON on one line, or base64-encode it. Set the same value on both **chat-api** and **chat-realtime**. Without it, the service runs normally but sends no notifications.
+
+The pushes are data-only: the Android app builds the notifications itself. This service also rings the callee's phone for incoming calls (`call`), stops the ringing when the call is answered, declined or cancelled (`call_end`), and clears a chat's notifications on your other phones once you read it (`read`).
+
+## Calls
+
+Calls ring for 45 seconds, then count as missed. Every call is written into the chat as a `call` message (missed, declined, or answered with its duration); only missed calls count as unread. If the callee opens the app while a call is still ringing, the call is sent to them again so they can answer it. `POST /calls/:callId/reject` (with `Authorization: Bearer <token>`) is the Decline button on the incoming-call notification, which works without opening the app.
