@@ -33,6 +33,10 @@ The server pushes these events to clients: `message:new`, `message:updated`, `me
 - `/internal/events` requires the `X-Internal-Secret` header. Keep it off the public internet (firewall or private network).
 - `src/shared/` is duplicated in chat-api. When you change a model, change it in both repos.
 
+## Usernames and privacy
+
+Registered names are private: payloads carry the user's `username`, and their phone number / email only when they chose to share them (users without a username always share their number). Notifications and incoming calls carry `@username` (or the number) as the name; the Android app replaces it with the name the recipient saved the person under.
+
 ## Push notifications
 
 New messages are pushed to the recipients' phones through Firebase Cloud Messaging, so they arrive as pop-up notifications even when the app is closed. Muted chats and the sender's own devices are skipped. Set `FIREBASE_SERVICE_ACCOUNT` to the service-account key from Firebase (*Project settings → Service accounts → Generate new private key*): paste the whole JSON on one line, or base64-encode it. Set the same value on both **chat-api** and **chat-realtime**. Without it, the service runs normally but sends no notifications.

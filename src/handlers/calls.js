@@ -8,6 +8,7 @@ import {
   pushIncomingCall,
   rooms,
   serializeMessage,
+  userLabel,
   verifyToken,
 } from '#shared';
 import { SocketError, objectId, toMembers } from '../socketUtils.js';
@@ -98,8 +99,9 @@ export function registerCallHandlers({ io, socket, userId, on }) {
       if (!shared) throw new SocketError('You can only call people you chat with');
       if (calls.has(id)) throw new SocketError('Call id already in use');
 
-      const caller = await User.findById(userId, 'name avatarUrl').lean();
-      const callerInfo = { id: userId, name: caller?.name, avatarUrl: caller?.avatarUrl ?? null };
+      // The callee's app shows the name it saved the caller under; this label is the fallback.
+      const caller = await User.findById(userId, 'username phone avatarUrl').lean();
+      const callerInfo = { id: userId, name: userLabel(caller), avatarUrl: caller?.avatarUrl ?? null };
       calls.set(id, {
         caller: userId,
         callee: toUserId,
