@@ -12,7 +12,7 @@ import {
   verifyToken,
 } from '#shared';
 import { SocketError, objectId, toMembers } from '../socketUtils.js';
-import { isOnline } from './presence.js';
+import { isConnected } from './presence.js';
 
 // WebRTC signaling for 1:1 voice/video calls. Media flows peer-to-peer; this service relays
 // offers/answers/ICE candidates, rings the callee's phone through push (so calls ring even
@@ -123,7 +123,7 @@ export function registerCallHandlers({ io, socket, userId, on }) {
 
       toUser(toUserId).emit(EVENTS.CALL_INCOMING, { callId: id, conversationId, kind, from: callerInfo });
       pushIncomingCall(toUserId, { callId: id, conversationId, kind, caller: callerInfo }); // rings even if the app is closed
-      return { reachable: isOnline(toUserId) };
+      return { reachable: isConnected(toUserId) };
     }
   );
 
