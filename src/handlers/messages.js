@@ -8,6 +8,9 @@ import {
   createMessage,
   findConversationForUser,
   pushNewMessage,
+  pushReaction,
+  pushReactionRemoved,
+  reactToMessage,
   rooms,
   sameId,
   serializeMessage,
@@ -130,21 +133,16 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
   });
 
   on('message:react', reactSchema, async ({ messageId, emoji }) => {
-    const { message, conversation } = await loadMessage(messageId);
-    if (message.deletedForEveryone || message.type === 'system') throw new SocketError('Cannot react to this');
-
-    const previous = message.reactions.find((r) => sameId(r.user, userId));
-    message.reactions = message.reactions.filter((r) => !sameId(r.user, userId));
-    // Picking the same emoji again removes it.
-    if (emoji && emoji !== previous?.emoji) message.reactions.push({ user: userId, emoji });
-    await message.save();
-
-    const patch = {
-      id: messageId,
-      conversationId: String(conversation._id),
-      reactions: message.reactions.map((r) => ({ user: String(r.user), emoji: r.emoji })),
-    };
+    let result;
+    try {
+      result = await reactToMessage({ messageId, userId, emoji });
+    } catch (err) {
+      throw new SocketError(err.message);
+    }
+    const { message, conversation, patch, added, removed, preview } = result;
     toMembers(io, conversation).emit(EVENTS.MESSAGE_UPDATED, patch);
-    return {};
+    if (added) pushReaction({ message, conversation, reactorId: userId, emoji: added, preview });
+    if (removed) pushReactionRemoved({ message, conversation, reactorId: userId });
+    return { reactions: patch.reactions };
   });
 }
