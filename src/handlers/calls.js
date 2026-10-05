@@ -3,6 +3,7 @@ import {
   Conversation,
   EVENTS,
   User,
+  blockStatus,
   createMessage,
   pushCallEnded,
   pushIncomingCall,
@@ -42,6 +43,7 @@ async function finish(id, status, { by } = {}) {
   clearTimeout(call.ringTimer);
   clearTimeout(call.ttlTimer);
   const duration = status === 'answered' && call.startedAt ? Math.round((Date.now() - call.startedAt) / 1000) : 0;
+  if (call.blocked) return { call, by }; // never rang for them: nothing to stop or log
 
   pushCallEnded(call.callee, {
     callId: id,
@@ -92,12 +94,14 @@ export function registerCallHandlers({ io, socket, userId, on }) {
     }),
     async ({ callId: id, conversationId, toUserId, kind }) => {
       if (toUserId === userId) throw new SocketError('You cannot call yourself');
-      const shared = await Conversation.exists({
+      const shared = await Conversation.findOne({
         _id: conversationId,
         'participants.user': { $all: [userId, toUserId] },
       });
       if (!shared) throw new SocketError('You can only call people you chat with');
       if (calls.has(id)) throw new SocketError('Call id already in use');
+      const block = await blockStatus(shared, userId);
+      if (block.iBlocked) throw new SocketError('You blocked this contact. Unblock them to call.');
 
       // The callee's app shows the name it saved the caller under; this label is the fallback.
       const caller = await User.findById(userId, 'username phone avatarUrl').lean();
@@ -110,6 +114,8 @@ export function registerCallHandlers({ io, socket, userId, on }) {
         callerInfo,
         state: 'ringing',
         startedAt: null,
+        // They blocked the caller: it never rings for them and isn't logged (as on WhatsApp).
+        blocked: block.blockedMe,
         // Nobody answered: it's a missed call.
         ringTimer: setTimeout(async () => {
           const ended = await finish(id, 'missed');
@@ -121,9 +127,11 @@ export function registerCallHandlers({ io, socket, userId, on }) {
         ttlTimer: setTimeout(() => calls.delete(id), CALL_TTL_MS),
       });
 
-      toUser(toUserId).emit(EVENTS.CALL_INCOMING, { callId: id, conversationId, kind, from: callerInfo });
-      pushIncomingCall(toUserId, { callId: id, conversationId, kind, caller: callerInfo }); // rings even if the app is closed
-      return { reachable: isConnected(toUserId) };
+      if (!block.blockedMe) {
+        toUser(toUserId).emit(EVENTS.CALL_INCOMING, { callId: id, conversationId, kind, from: callerInfo });
+        pushIncomingCall(toUserId, { callId: id, conversationId, kind, caller: callerInfo }); // rings even if the app is closed
+      }
+      return { reachable: !block.blockedMe && isConnected(toUserId) }; // never reveals a block
     }
   );
 

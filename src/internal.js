@@ -12,7 +12,14 @@ const opsSchema = z.object({
   ops: z
     .array(
       z.discriminatedUnion('op', [
-        z.object({ op: z.literal('emit'), rooms: z.array(room).min(1), event: z.string().min(1).max(64), data: z.any() }),
+        z.object({
+          op: z.literal('emit'),
+          rooms: z.array(room).min(1),
+          except: z.array(room).optional(), // e.g. people the user blocked
+          event: z.string().min(1).max(64),
+          data: z.any(),
+        }),
+        z.object({ op: z.literal('disconnect'), rooms: z.array(room).min(1) }), // an account was disabled
         z.object({ op: z.literal('join'), rooms: z.array(room).min(1), room }),
         z.object({ op: z.literal('leave'), rooms: z.array(room).min(1), room }),
       ])
@@ -60,7 +67,8 @@ export async function handleInternalEvents(io, req, res) {
     const parsed = opsSchema.safeParse(await readJson(req));
     if (!parsed.success) return reply(400, { message: parsed.error.issues[0]?.message || 'Invalid ops' });
     for (const op of parsed.data.ops) {
-      if (op.op === 'emit') io.to(op.rooms).emit(op.event, op.data);
+      if (op.op === 'emit') io.to(op.rooms).except(op.except || []).emit(op.event, op.data);
+      else if (op.op === 'disconnect') io.in(op.rooms).disconnectSockets(true);
       else if (op.op === 'join') io.in(op.rooms).socketsJoin(op.room);
       else io.in(op.rooms).socketsLeave(op.room);
     }

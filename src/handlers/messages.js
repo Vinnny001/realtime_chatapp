@@ -7,6 +7,7 @@ import {
   canSend,
   createMessage,
   findConversationForUser,
+  blockStatus,
   pushNewMessage,
   pushReaction,
   pushReactionRemoved,
@@ -63,6 +64,9 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
     if (!conversation) throw new SocketError('Conversation not found');
     if (!canSend(conversation, userId)) throw new SocketError('Only admins can send messages to this group');
 
+    const block = await blockStatus(conversation, userId);
+    if (block.iBlocked) throw new SocketError('You blocked this contact. Unblock them to send a message.');
+
     const replyTo =
       data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conversation._id }))
         ? data.replyTo
@@ -77,10 +81,14 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
       replyTo,
       forwarded: data.forwarded,
       clientId: data.clientId,
+      // They blocked me: it stays one tick on my side and never reaches them (as on WhatsApp).
+      hiddenFrom: block.blockedMe ? [block.peerId] : [],
     });
 
     socket.join(rooms.conv(conversation._id));
-    if (!duplicate) {
+    if (!duplicate && block.blockedMe) {
+      io.to(rooms.user(userId)).emit(EVENTS.MESSAGE_NEW, serializeMessage(message));
+    } else if (!duplicate) {
       toMembers(io, conversation).emit(EVENTS.MESSAGE_NEW, serializeMessage(message));
       pushNewMessage(message, conversation); // phones in the background / app closed
     }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EVENTS, User, rooms } from '#shared';
+import { EVENTS, User, blockedBy, rooms } from '#shared';
 import { objectId } from '../socketUtils.js';
 
 // userId -> Map(socketId -> active) for that user's connected sockets (one per device/tab).
@@ -44,14 +44,15 @@ export function registerPresenceHandlers({ io, socket, userId, on }) {
     // Hiding your own last seen also hides everyone else's from you (as on WhatsApp).
     const me = await User.findById(userId, 'settings').lean();
     const iHide = me?.settings?.showLastSeen === false;
+    const blockedMe = new Set(await blockedBy(userId)); // they don't show me online / last seen
     const byId = new Map(users.map((u) => [String(u._id), u]));
     return {
       presence: userIds.map((id) => {
         const u = byId.get(id);
         return {
           userId: id,
-          online: isOnline(id),
-          lastSeen: iHide || u?.settings?.showLastSeen === false ? null : u?.lastSeen ?? null,
+          online: !blockedMe.has(id) && isOnline(id),
+          lastSeen: iHide || blockedMe.has(id) || u?.settings?.showLastSeen === false ? null : u?.lastSeen ?? null,
         };
       }),
     };
@@ -70,20 +71,25 @@ export function registerPresenceHandlers({ io, socket, userId, on }) {
   );
 }
 
-function announceOnline(socket, userId) {
+/** "Online" to my chats, except people I blocked. */
+async function announceOnline(socket, userId) {
   const convRooms = convRoomsOf(socket);
-  if (convRooms.length) socket.to(convRooms).emit(EVENTS.PRESENCE, { userId, online: true });
+  if (!convRooms.length) return;
+  const me = await User.findById(userId, 'blocked').lean().catch(() => null);
+  const except = (me?.blocked || []).map((id) => rooms.user(String(id)));
+  socket.to(convRooms).except(except).emit(EVENTS.PRESENCE, { userId, online: true });
 }
 
 /** Last seen = now; tell their chats they're offline. */
 async function wentOffline(io, userId, convRooms) {
   try {
     const lastSeen = new Date();
-    const user = await User.findByIdAndUpdate(userId, { lastSeen }, { new: true }).select('settings').lean();
+    const user = await User.findByIdAndUpdate(userId, { lastSeen }, { new: true }).select('settings blocked').lean();
+    const iBlocked = new Set((user?.blocked || []).map(String));
     // They may have come back while we were saving lastSeen.
     if (isOnline(userId) || !convRooms.length) return;
     const shared = user?.settings?.showLastSeen === false ? null : lastSeen;
-    if (!shared) {
+    if (!shared && !iBlocked.size) {
       io.to(convRooms).emit(EVENTS.PRESENCE, { userId, online: false, lastSeen: null });
       return;
     }
@@ -95,6 +101,7 @@ async function wentOffline(io, userId, convRooms) {
     );
     for (const s of sockets) {
       if (s.data.userId === userId) continue;
+      if (iBlocked.has(s.data.userId)) continue; // people I blocked don't see my presence
       s.emit(EVENTS.PRESENCE, { userId, online: false, lastSeen: hiding.has(s.data.userId) ? null : shared });
     }
   } catch (err) {
