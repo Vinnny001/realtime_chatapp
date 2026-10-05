@@ -55,7 +55,7 @@ const io = new Server(server, {
 
 io.use(async (socket, next) => {
   const userId = verifyToken(socket.handshake.auth?.token);
-  if (!userId || !(await User.exists({ _id: userId }))) return next(new Error('unauthorized'));
+  if (!userId || !(await User.exists({ _id: userId, disabled: { $ne: true } }))) return next(new Error('unauthorized'));
   socket.data.userId = userId;
   next();
 });
