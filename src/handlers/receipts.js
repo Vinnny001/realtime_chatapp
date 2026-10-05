@@ -51,9 +51,10 @@ export function registerReceiptHandlers({ io, userId, on }) {
       createdAt: { $gt: at },
       $nor: [{ type: 'call', 'call.status': { $ne: 'missed' } }], // only missed calls count as unread
     });
+    const unreadMentions = await Message.countDocuments({ conversation: conversationId, mentions: userId, createdAt: { $gt: at } });
     await Conversation.updateOne(
       { _id: conversationId, 'participants.user': userId },
-      { $set: { 'participants.$.unreadCount': unreadCount } }
+      { $set: { 'participants.$.unreadCount': unreadCount, 'participants.$.unreadMentions': unreadMentions } }
     );
     toMembers(io, conv).emit(EVENTS.RECEIPT, { conversationId, userId, kind: 'read', at, unreadCount });
     if (changed && unreadCount === 0) pushRead(userId, conversationId); // clear it on my other phones
