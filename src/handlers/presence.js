@@ -41,6 +41,9 @@ export function registerPresenceHandlers({ io, socket, userId, on }) {
   on('presence:get', z.object({ userIds: z.array(objectId).max(500) }), async ({ userIds }) => {
     if (!userIds.length) return { presence: [] };
     const users = await User.find({ _id: { $in: userIds } }, 'lastSeen settings').lean();
+    // Hiding your own last seen also hides everyone else's from you (as on WhatsApp).
+    const me = await User.findById(userId, 'settings').lean();
+    const iHide = me?.settings?.showLastSeen === false;
     const byId = new Map(users.map((u) => [String(u._id), u]));
     return {
       presence: userIds.map((id) => {
@@ -48,7 +51,7 @@ export function registerPresenceHandlers({ io, socket, userId, on }) {
         return {
           userId: id,
           online: isOnline(id),
-          lastSeen: u?.settings?.showLastSeen === false ? null : u?.lastSeen ?? null,
+          lastSeen: iHide || u?.settings?.showLastSeen === false ? null : u?.lastSeen ?? null,
         };
       }),
     };
@@ -79,11 +82,21 @@ async function wentOffline(io, userId, convRooms) {
     const user = await User.findByIdAndUpdate(userId, { lastSeen }, { new: true }).select('settings').lean();
     // They may have come back while we were saving lastSeen.
     if (isOnline(userId) || !convRooms.length) return;
-    io.to(convRooms).emit(EVENTS.PRESENCE, {
-      userId,
-      online: false,
-      lastSeen: user?.settings?.showLastSeen === false ? null : lastSeen,
-    });
+    const shared = user?.settings?.showLastSeen === false ? null : lastSeen;
+    if (!shared) {
+      io.to(convRooms).emit(EVENTS.PRESENCE, { userId, online: false, lastSeen: null });
+      return;
+    }
+    // Viewers who hide their own last seen don't get anyone else's.
+    const sockets = await io.in(convRooms).fetchSockets();
+    const viewerIds = [...new Set(sockets.map((s) => s.data.userId))];
+    const hiding = new Set(
+      (await User.find({ _id: { $in: viewerIds }, 'settings.showLastSeen': false }, '_id').lean()).map((u) => String(u._id))
+    );
+    for (const s of sockets) {
+      if (s.data.userId === userId) continue;
+      s.emit(EVENTS.PRESENCE, { userId, online: false, lastSeen: hiding.has(s.data.userId) ? null : shared });
+    }
   } catch (err) {
     console.error('[realtime] presence offline failed:', err.message);
   }
