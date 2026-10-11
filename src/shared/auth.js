@@ -14,3 +14,17 @@ export function verifyToken(token) {
     return null;
   }
 }
+
+/**
+ * The payload of a full (not pending) login token, or null. `did` is the device it was
+ * issued to (absent on tokens from before devices existed).
+ */
+export function readToken(token) {
+  try {
+    const payload = jwt.verify(token, config.jwtSecret);
+    if (payload.pending || typeof payload.sub !== 'string') return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}

@@ -10,7 +10,7 @@ import {
   rooms,
   serializeMessage,
   userLabel,
-  verifyToken,
+  authenticate,
 } from '#shared';
 import { SocketError, objectId, toMembers } from '../socketUtils.js';
 import { isConnected } from './presence.js';
@@ -186,8 +186,9 @@ export async function handleRejectRequest(io, req, res, id) {
     res.end(JSON.stringify(body));
   };
   const auth = req.headers.authorization || '';
-  const userId = verifyToken(auth.startsWith('Bearer ') ? auth.slice(7) : '');
-  if (!userId) return reply(401, { message: 'Not signed in' });
+  const session = await authenticate(auth.startsWith('Bearer ') ? auth.slice(7) : '');
+  if (!session) return reply(401, { message: 'Not signed in' });
+  const { userId } = session;
   const call = calls.get(id);
   if (!call || call.callee !== userId) return reply(404, { message: 'Call not found' });
   await finish(id, 'declined');

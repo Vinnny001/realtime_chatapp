@@ -1,6 +1,6 @@
 # chat-realtime
 
-Socket.IO service for ChatApp. It handles sending messages, delivered/read receipts, typing indicators, online/last seen, edits, deletes, reactions, @mentions (stored with the message; read receipts reset the @ count), and WebRTC call signaling.
+Socket.IO service for ChatApp. Connections are checked against the signed-in device (signed-out devices are refused and disconnected). It handles sending messages, delivered/read receipts, typing indicators, online/last seen, edits, deletes, reactions, @mentions (stored with the message; read receipts reset the @ count), and WebRTC call signaling.
 
 It works with two other repos:
 - **chat-api**: the REST service. It issues the login tokens this service checks, and sends live events to `POST /internal/events`.

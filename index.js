@@ -4,13 +4,12 @@ import {
   Conversation,
   EVENTS,
   INTERNAL_EVENTS_PATH,
-  User,
+  authenticate,
   config,
   connectMongo,
   initPush,
   corsOriginOption,
   rooms,
-  verifyToken,
 } from '#shared';
 import { createOn } from './src/socketUtils.js';
 import { handleInternalEvents } from './src/internal.js';
@@ -54,10 +53,16 @@ const io = new Server(server, {
 });
 
 io.use(async (socket, next) => {
-  const userId = verifyToken(socket.handshake.auth?.token);
-  if (!userId || !(await User.exists({ _id: userId, disabled: { $ne: true } }))) return next(new Error('unauthorized'));
-  socket.data.userId = userId;
-  next();
+  try {
+    // Disabled accounts and signed-out devices are turned away.
+    const session = await authenticate(socket.handshake.auth?.token);
+    if (!session) return next(new Error('unauthorized'));
+    socket.data.userId = session.userId;
+    socket.data.deviceId = session.deviceId;
+    next();
+  } catch {
+    next(new Error('unavailable'));
+  }
 });
 
 io.on('connection', async (socket) => {
@@ -75,7 +80,11 @@ io.on('connection', async (socket) => {
       { 'participants.user': userId },
       { lastMessageAt: 1, participants: { $elemMatch: { user: userId } } }
     ).lean();
-    socket.join([rooms.user(userId), ...conversations.map((c) => rooms.conv(c._id))]);
+    socket.join([
+      rooms.user(userId),
+      ...(socket.data.deviceId ? [rooms.device(socket.data.deviceId)] : []), // so signing it out closes this
+      ...conversations.map((c) => rooms.conv(c._id)),
+    ]);
     goOnline(ctx);
     // Opened the app while someone is calling: show the ringing call now.
     for (const call of ringingCallsFor(userId)) socket.emit(EVENTS.CALL_INCOMING, call);
