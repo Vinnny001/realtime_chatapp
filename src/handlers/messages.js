@@ -45,6 +45,7 @@ const sendSchema = z
       .object({ ciphertext: z.string().min(16).max(400_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) })
       .optional(),
     mentions: z.array(objectId).max(512).optional(), // encrypted messages say whom they mention
+    pollMeta: z.object({ count: z.number().int().min(2).max(12), multiple: z.boolean().optional() }).optional(),
     poll: z
       .object({
         question: z.string().trim().min(1, 'Ask a question').max(300),
@@ -55,8 +56,11 @@ const sendSchema = z
       .optional(),
   })
   .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 || !!d.e2ee : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
-  .refine((d) => !d.e2ee || (d.type === 'text' && !d.text), 'Only text messages are encrypted for now')
-  .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video', 'Only photos and videos can be view once');
+  // Encrypted messages go as "text" whatever they contain (the content and its kind are in the
+  // ciphertext). View-once keeps its file address here: the server hands it out once.
+  .refine((d) => !d.e2ee || (d.type === 'text' && !d.text && (!d.media || d.viewOnce)), 'Invalid encrypted message')
+  .refine((d) => !d.pollMeta || !!d.e2ee, 'Invalid poll')
+  .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video' || (d.e2ee && d.media), 'Only photos and videos can be view once');
 
 const editSchema = z
   .object({
@@ -88,7 +92,7 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
     const block = await blockStatus(conversation, userId);
     if (block.iBlocked) throw new SocketError('You blocked this contact. Unblock them to send a message.');
     // An encrypted chat never takes plaintext text (no downgrade by an old or tampered app).
-    if (conversation.mls?.enabled && data.type === 'text' && !data.e2ee) {
+    if (conversation.mls?.enabled && !data.e2ee) {
       throw new SocketError('This chat is end-to-end encrypted. Update ChatApp to send messages here.');
     }
     if (data.e2ee && !socket.data.deviceId) throw new SocketError('Update ChatApp to send encrypted messages.');
@@ -108,6 +112,7 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
       forwarded: data.forwarded,
       viewOnce: data.viewOnce,
       poll: data.poll,
+      pollMeta: data.pollMeta,
       ...(data.e2ee && { e2ee: { ...data.e2ee, device: socket.data.deviceId }, mentionIds: data.mentions || [] }),
       clientId: data.clientId,
       // They blocked me: it stays one tick on my side and never reaches them (as on WhatsApp).
