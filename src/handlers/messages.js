@@ -41,6 +41,10 @@ const sendSchema = z
     replyTo: objectId.nullish(),
     forwarded: z.boolean().optional(),
     viewOnce: z.boolean().optional(),
+    e2ee: z
+      .object({ ciphertext: z.string().min(16).max(400_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) })
+      .optional(),
+    mentions: z.array(objectId).max(512).optional(), // encrypted messages say whom they mention
     poll: z
       .object({
         question: z.string().trim().min(1, 'Ask a question').max(300),
@@ -50,10 +54,17 @@ const sendSchema = z
       .refine((p) => new Set(p.options.map((o) => o.toLowerCase())).size === p.options.length, 'Options must be different')
       .optional(),
   })
-  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
+  .refine((d) => (d.type === 'text' ? d.text.trim().length > 0 || !!d.e2ee : d.type === 'poll' ? !!d.poll : !!d.media), 'Message is empty')
+  .refine((d) => !d.e2ee || (d.type === 'text' && !d.text), 'Only text messages are encrypted for now')
   .refine((d) => !d.viewOnce || d.type === 'image' || d.type === 'video', 'Only photos and videos can be view once');
 
-const editSchema = z.object({ messageId: objectId, text: z.string().trim().min(1).max(MAX_TEXT_LENGTH) });
+const editSchema = z
+  .object({
+    messageId: objectId,
+    text: z.string().trim().max(MAX_TEXT_LENGTH).default(''),
+    e2ee: z.object({ ciphertext: z.string().min(16).max(400_000).regex(/^[A-Za-z0-9+/=]+$/), epoch: z.number().int().min(0) }).optional(),
+  })
+  .refine((d) => !!d.e2ee !== !!d.text, 'Nothing to change');
 const deleteSchema = z.object({ messageId: objectId, forEveryone: z.boolean().default(false) });
 const reactSchema = z.object({ messageId: objectId, emoji: z.string().min(1).max(16).nullable() });
 
@@ -76,6 +87,11 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
 
     const block = await blockStatus(conversation, userId);
     if (block.iBlocked) throw new SocketError('You blocked this contact. Unblock them to send a message.');
+    // An encrypted chat never takes plaintext text (no downgrade by an old or tampered app).
+    if (conversation.mls?.enabled && data.type === 'text' && !data.e2ee) {
+      throw new SocketError('This chat is end-to-end encrypted. Update ChatApp to send messages here.');
+    }
+    if (data.e2ee && !socket.data.deviceId) throw new SocketError('Update ChatApp to send encrypted messages.');
 
     const replyTo =
       data.replyTo && (await Message.exists({ _id: data.replyTo, conversation: conversation._id }))
@@ -92,6 +108,7 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
       forwarded: data.forwarded,
       viewOnce: data.viewOnce,
       poll: data.poll,
+      ...(data.e2ee && { e2ee: { ...data.e2ee, device: socket.data.deviceId }, mentionIds: data.mentions || [] }),
       clientId: data.clientId,
       // They blocked me: it stays one tick on my side and never reaches them (as on WhatsApp).
       hiddenFrom: block.blockedMe ? [block.peerId] : [],
@@ -107,7 +124,7 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
     return { message: serializeMessage(message, userId) };
   });
 
-  on('message:edit', editSchema, async ({ messageId, text }) => {
+  on('message:edit', editSchema, async ({ messageId, text, e2ee }) => {
     const { message, conversation } = await loadMessage(messageId);
     if (!sameId(message.sender, userId) || message.deletedForEveryone || message.type === 'system') {
       throw new SocketError('You can only edit your own messages');
@@ -115,11 +132,19 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
     if (Date.now() - message.createdAt > EDIT_WINDOW_MS) {
       throw new SocketError('Messages can only be edited within 24 hours');
     }
-    message.text = text;
+    // An encrypted message is edited with a new ciphertext (and a plain one only with text).
+    if (!!message.e2ee?.ciphertext !== !!e2ee) throw new SocketError('Update ChatApp to edit this message');
+    if (e2ee) message.e2ee = { ...e2ee, device: socket.data.deviceId };
+    else message.text = text;
     message.editedAt = new Date();
     await message.save();
 
-    const patch = { id: messageId, conversationId: String(conversation._id), text, editedAt: message.editedAt };
+    const patch = {
+      id: messageId,
+      conversationId: String(conversation._id),
+      editedAt: message.editedAt,
+      ...(e2ee ? { e2ee: { ...e2ee, device: socket.data.deviceId } } : { text }),
+    };
     toMembers(io, conversation).emit(EVENTS.MESSAGE_UPDATED, patch);
     return { message: patch };
   });
