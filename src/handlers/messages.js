@@ -91,10 +91,8 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
 
     const block = await blockStatus(conversation, userId);
     if (block.iBlocked) throw new SocketError('You blocked this contact. Unblock them to send a message.');
-    // An encrypted chat never takes plaintext text (no downgrade by an old or tampered app).
-    if (conversation.mls?.enabled && !data.e2ee) {
-      throw new SocketError('This chat is end-to-end encrypted. Update ChatApp to send messages here.');
-    }
+    // Every message is end-to-end encrypted: plaintext is refused (an old or tampered app).
+    if (!data.e2ee) throw new SocketError('Messages must be end-to-end encrypted. Update ChatApp to send messages.');
     if (data.e2ee && !socket.data.deviceId) throw new SocketError('Update ChatApp to send encrypted messages.');
 
     const replyTo =
@@ -138,7 +136,8 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
       throw new SocketError('Messages can only be edited within 24 hours');
     }
     // An encrypted message is edited with a new ciphertext (and a plain one only with text).
-    if (!!message.e2ee?.ciphertext !== !!e2ee) throw new SocketError('Update ChatApp to edit this message');
+    if (!message.e2ee?.ciphertext) throw new SocketError('Messages sent before encryption can’t be edited');
+    if (!e2ee) throw new SocketError('Update ChatApp to edit this message');
     if (e2ee) message.e2ee = { ...e2ee, device: socket.data.deviceId };
     else message.text = text;
     message.editedAt = new Date();
