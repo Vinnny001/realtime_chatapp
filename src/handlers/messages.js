@@ -6,7 +6,7 @@ import {
   UPLOAD_URL_PATTERN,
   canSend,
   createMessage,
-  findConversationForUser,
+  findChatForUser,
   blockStatus,
   pushNewMessage,
   pushReaction,
@@ -78,14 +78,14 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
   /** Loads a message plus its conversation, ensuring the user is a member. */
   async function loadMessage(messageId) {
     const message = await Message.findById(messageId);
-    const conversation = message && (await findConversationForUser(message.conversation, userId));
+    const conversation = message && (await findChatForUser(message.conversation, userId));
     if (!conversation) throw new SocketError('Message not found');
     return { message, conversation };
   }
 
   on('message:send', sendSchema, async (data) => {
     if (!allowSend()) throw new SocketError('You are sending messages too fast');
-    const conversation = await findConversationForUser(data.conversationId, userId);
+    const conversation = await findChatForUser(data.conversationId, userId);
     if (!conversation) throw new SocketError('Conversation not found');
     if (!canSend(conversation, userId)) throw new SocketError('Only admins can send messages to this group');
 
