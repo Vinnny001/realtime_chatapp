@@ -54,7 +54,7 @@ export function registerReceiptHandlers({ io, userId, on }) {
     const unreadMentions = await Message.countDocuments({ conversation: conversationId, mentions: userId, createdAt: { $gt: at } });
     await Conversation.updateOne(
       { _id: conversationId, 'participants.user': userId },
-      { $set: { 'participants.$.unreadCount': unreadCount, 'participants.$.unreadMentions': unreadMentions } }
+      { $set: { 'participants.$.unreadCount': unreadCount, 'participants.$.unreadMentions': unreadMentions, 'participants.$.markedUnread': false } }
     );
     toMembers(io, conv).emit(EVENTS.RECEIPT, { conversationId, userId, kind: 'read', at, unreadCount });
     if (changed && unreadCount === 0) pushRead(userId, conversationId); // clear it on my other phones

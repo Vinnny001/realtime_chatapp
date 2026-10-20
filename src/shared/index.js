@@ -17,6 +17,7 @@ export {
   pushCallEnded,
   pushGroupCall,
   pushIncomingCall,
+  pushMessageEdited,
   pushNewMessage,
   pushReaction,
   pushReactionRemoved,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  Conversation,
   EVENTS,
   MAX_TEXT_LENGTH,
   Message,
@@ -8,6 +9,7 @@ import {
   createMessage,
   findChatForUser,
   blockStatus,
+  pushMessageEdited,
   pushNewMessage,
   pushReaction,
   pushReactionRemoved,
@@ -150,6 +152,13 @@ export function registerMessageHandlers({ io, socket, userId, on }) {
       ...(e2ee ? { e2ee: { ...e2ee, device: socket.data.deviceId } } : { text }),
     };
     toMembers(io, conversation).emit(EVENTS.MESSAGE_UPDATED, patch);
+    // Members who had already read it: the chat shows as unread again, so they see the change.
+    const readIt = conversation.participants.filter((p) => !sameId(p.user, userId) && p.lastReadAt >= message.createdAt).map((p) => p.user);
+    if (readIt.length) {
+      await Conversation.updateOne({ _id: conversation._id }, { $set: { 'participants.$[p].markedUnread': true } }, { arrayFilters: [{ 'p.user': { $in: readIt } }] });
+      for (const id of readIt) io.to(rooms.user(String(id))).emit(EVENTS.CONVERSATION_MARKED, { conversationId: String(conversation._id) });
+    }
+    pushMessageEdited(message, conversation); // the phones' notifications follow the edit
     return { message: patch };
   });
 
