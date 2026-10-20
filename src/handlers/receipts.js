@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Conversation, EVENTS, Message, pushRead, rooms } from '#shared';
+import { Conversation, EVENTS, Message, pushRead, recordReceipts, rooms } from '#shared';
 import { SocketError, objectId, toMembers } from '../socketUtils.js';
 
 // Receipts are watermarks: "everything up to <at> in this chat has reached / been read by me".
@@ -35,6 +35,7 @@ export function registerReceiptHandlers({ io, userId, on }) {
     const conv = await members(conversationId);
     const at = clamp(upTo);
     if (await advance(userId, conversationId, ['lastDeliveredAt'], at)) {
+      recordReceipts(conversationId, userId, at).catch(() => {});
       toMembers(io, conv).emit(EVENTS.RECEIPT, { conversationId, userId, kind: 'delivered', at });
     }
     return {};
@@ -44,6 +45,7 @@ export function registerReceiptHandlers({ io, userId, on }) {
     const conv = await members(conversationId);
     const at = clamp(upTo);
     const changed = await advance(userId, conversationId, ['lastDeliveredAt', 'lastReadAt'], at);
+    if (changed) recordReceipts(conversationId, userId, at, { read: true }).catch(() => {});
 
     const unreadCount = await Message.countDocuments({
       conversation: conversationId,
@@ -76,6 +78,7 @@ export async function markAllDelivered(io, userId, conversations) {
     { $set: { 'participants.$.lastDeliveredAt': now } }
   );
   for (const c of stale) {
+    recordReceipts(c._id, userId, now).catch(() => {});
     io.to(rooms.conv(c._id)).emit(EVENTS.RECEIPT, {
       conversationId: String(c._id),
       userId,
